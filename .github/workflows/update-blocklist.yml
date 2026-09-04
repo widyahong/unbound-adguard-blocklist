@@ -1,0 +1,51 @@
+name: Update Unbound AdGuard Blocklist
+
+on:
+  schedule:
+    # Every day at 07:00 UTC.
+    - cron: "0 7 * * *"
+  workflow_dispatch: {}   # allows manual trigger from the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  update-blocklist:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Download AdGuard DNS filter
+        run: |
+          curl -sSL --fail -o filter.txt \
+            "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt"
+          wc -l filter.txt
+
+      - name: Convert to unbound.conf
+        run: node scripts/convert.js
+
+      - name: Validate with unbound-checkconf
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq unbound
+          printf 'server:\n    include: "%s/adguard-dns.conf"\n' "$PWD" > test-unbound.conf
+          unbound-checkconf test-unbound.conf
+          rm test-unbound.conf
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add adguard-dns.conf
+          if git diff --cached --quiet; then
+            echo "No changes to the blocklist."
+          else
+            git commit -m "chore: update AdGuard DNS blocklist ($(date -u +'%Y-%m-%d'))"
+            git push
+          fi
